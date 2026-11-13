@@ -106,7 +106,7 @@ public static class OrderState
     {
         order.Status = status;
         order.UpdatedAt = DateTimeOffset.UtcNow;
-        order.History.Add(new OrderHistory { OrderId = order.Id, Status = status, Reason = reason, CreatedAt = DateTimeOffset.UtcNow });
+        db.OrderHistories.Add(new OrderHistory { OrderId = order.Id, Status = status, Reason = reason, CreatedAt = DateTimeOffset.UtcNow });
         await db.SaveChangesAsync();
     }
 }
