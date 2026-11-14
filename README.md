@@ -14,6 +14,15 @@ Microsservico responsavel pela abertura, consulta e atualizacao das ordens de se
 - Publica `OS_CREATED` ao abrir uma OS.
 - Publica `OS_STATUS_UPDATED` ao alterar o status.
 - Publica `OS_READY_FOR_EXECUTION` apos pagamento aprovado.
+
+## Saga e BDD
+
+O OS Service concentra a decisao de transicao do Saga em `OrderSaga`. O fluxo
+principal e `BUDGET_CREATED -> PAYMENT_APPROVED -> EXECUTION_FINISHED`, com
+compensacoes explicitas para `BUDGET_REJECTED`, `PAYMENT_REJECTED` e
+`EXECUTION_FAILED`. O cenario BDD esta em
+`Tests/OsService.Tests/Features/order-lifecycle.feature` e e coberto pelo teste
+`Bdd_Saga_Completes_Order_Flow_And_Compensates_Failures`.
 - Consome eventos de orcamento, pagamento e execucao.
 
 ## Endpoints principais

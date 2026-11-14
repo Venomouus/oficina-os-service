@@ -135,8 +135,8 @@ public sealed class OsEventConsumer(IServiceScopeFactory scopes, IConfiguration 
                 using var document = JsonDocument.Parse(args.Body.ToArray()); var payload = document.RootElement.GetProperty("payload"); var orderId = payload.GetProperty("orderId").GetGuid(); var type = document.RootElement.GetProperty("type").GetString() ?? ""; using var scope = scopes.CreateScope(); var db = scope.ServiceProvider.GetRequiredService<OsDbContext>(); var order = await db.Orders.FindAsync(orderId);
                 if (order is not null)
                 {
-                    var next = type switch { "BUDGET_CREATED" => OrderStatuses.AguardandoPagamento, "BUDGET_REJECTED" => OrderStatuses.OrcamentoRejeitado, "PAYMENT_APPROVED" => OrderStatuses.AguardandoExecucao, "PAYMENT_REJECTED" => OrderStatuses.PagamentoRecusado, "EXECUTION_FINISHED" => OrderStatuses.Finalizada, _ => OrderStatuses.ExecucaoComErro };
-                    await OrderState.ChangeStatusAsync(order, next, $"Evento {type}", db); if (type == "PAYMENT_APPROVED") await events.PublishAsync("OS_READY_FOR_EXECUTION", new { orderId });
+                    var next = OrderSaga.NextStatusForEvent(type);
+                    await OrderState.ChangeStatusAsync(order, next, $"Evento {type}", db); if (OrderSaga.StartsExecution(type)) await events.PublishAsync("OS_READY_FOR_EXECUTION", new { orderId });
                 }
                 channel.BasicAck(args.DeliveryTag, false);
             }
