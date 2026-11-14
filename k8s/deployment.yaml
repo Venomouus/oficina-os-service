@@ -1,0 +1,77 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: os-service
+  namespace: oficina
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: os-service
+  template:
+    metadata:
+      labels:
+        app: os-service
+    spec:
+      containers:
+        - name: os-service
+          image: oficina-os-service:local
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          env:
+            - name: ASPNETCORE_URLS
+              value: http://+:8080
+            - name: ConnectionStrings__OsDatabase
+              valueFrom:
+                secretKeyRef:
+                  name: os-service-secrets
+                  key: database-connection
+            - name: RabbitMq__Host
+              value: rabbitmq
+            - name: RabbitMq__Port
+              value: "5672"
+            - name: RabbitMq__User
+              valueFrom:
+                secretKeyRef:
+                  name: messaging-secrets
+                  key: username
+            - name: RabbitMq__Password
+              valueFrom:
+                secretKeyRef:
+                  name: messaging-secrets
+                  key: password
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 20
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: os-service
+  namespace: oficina
+spec:
+  selector:
+    app: os-service
+  ports:
+    - port: 8081
+      targetPort: 8080
+  type: ClusterIP
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: os-service-secrets
+  namespace: oficina
+type: Opaque
+stringData:
+  database-connection: Host=os-db;Port=5432;Database=oficina_os;Username=postgres;Password=postgres
