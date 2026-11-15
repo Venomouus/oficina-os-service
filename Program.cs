@@ -5,6 +5,7 @@ using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Services.Configure<HostOptions>(options => options.BackgroundServiceExceptionBehavior = BackgroundServiceExceptionBehavior.StopHost);
 builder.Services.AddDbContext<OsDbContext>(options => options.UseNpgsql(builder.Configuration.GetConnectionString("OsDatabase")));
 builder.Services.AddSingleton<EventPublisher>();
 builder.Services.AddHostedService<OsEventConsumer>();
