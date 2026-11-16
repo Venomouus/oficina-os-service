@@ -65,6 +65,20 @@ public class OrderTests
         Assert.Equal(OrderStatuses.AguardandoExecucao, OrderSaga.NextStatus(OrderStatuses.PagamentoRecusado, "PAYMENT_APPROVED"));
     }
 
+    [Theory]
+    [InlineData(OrderStatuses.AguardandoOrcamento, "BUDGET_REJECTED", OrderStatuses.OrcamentoRejeitado)]
+    [InlineData(OrderStatuses.EmDiagnostico, "EXECUTION_FINISHED", OrderStatuses.Finalizada)]
+    [InlineData(OrderStatuses.EmReparo, "EXECUTION_FINISHED", OrderStatuses.Finalizada)]
+    [InlineData(OrderStatuses.EmDiagnostico, "EXECUTION_FAILED", OrderStatuses.ExecucaoComErro)]
+    [InlineData(OrderStatuses.EmReparo, "EXECUTION_FAILED", OrderStatuses.ExecucaoComErro)]
+    public void Saga_Handles_Compensation_And_Execution_From_Intermediate_States(string current, string eventType, string expected)
+    {
+        Assert.Equal(expected, OrderSaga.NextStatus(current, eventType));
+        Assert.False(OrderSaga.StartsExecution(eventType));
+        Assert.False(OrderSaga.IsTerminal(current));
+        Assert.True(OrderSaga.IsTerminal(expected));
+    }
+
     [Fact]
     public async Task Outbox_Retries_After_Broker_Failure_Without_Losing_Event()
     {
