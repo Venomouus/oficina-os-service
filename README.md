@@ -87,3 +87,17 @@ dotnet run
 ```
 
 Configuracao padrao: PostgreSQL em `localhost:5433` e RabbitMQ em `localhost:5672`.
+
+## CI/CD e observabilidade
+
+O PR executa testes/cobertura, BDD distribuido, SonarCloud com Quality Gate
+bloqueante e build Docker. Em `main`, o job `publish-deploy` publica a imagem
+`ghcr.io/venomouus/oficina-os-service:<SHA>` e aguarda o rollout em Kubernetes.
+E preciso configurar `KUBE_CONFIG_B64` no GitHub, o namespace `oficina` e os
+Secrets `messaging-secrets` e `os-service-secrets` no cluster; sem eles o
+deploy falha. O manifesto nao contem credenciais reais.
+
+Logs JSON vao para stdout. Com `OTEL_EXPORTER_OTLP_ENDPOINT` definido, traces,
+metricas HTTP/Saga e logs vao por OTLP gRPC ao coletor; o ConfigMap opcional
+`observability-config` fornece o endereco no Kubernetes. O painel fica no
+Grafana conectado a esse coletor, nao no Swagger.

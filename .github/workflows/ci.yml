@@ -33,7 +33,7 @@ jobs:
         run: dotnet restore Tests/OsService.Tests/OsService.Tests.csproj
 
       - name: Begin SonarCloud analysis
-        run: '"$RUNNER_TEMP/sonar/dotnet-sonarscanner" begin /k:"Venomouus_oficina-os-service" /o:"venomouus" /d:sonar.token="$SONAR_TOKEN" /d:sonar.cs.opencover.reportsPaths="Tests/OsService.Tests/TestResults/**/coverage.opencover.xml" /d:sonar.coverage.exclusions="**/*.ps1"'
+        run: '"$RUNNER_TEMP/sonar/dotnet-sonarscanner" begin /k:"Venomouus_oficina-os-service" /o:"venomouus" /d:sonar.token="$SONAR_TOKEN" /d:sonar.cs.opencover.reportsPaths="Tests/OsService.Tests/TestResults/**/coverage.opencover.xml" /d:sonar.coverage.exclusions="**/*.ps1" /d:sonar.qualitygate.wait=true'
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
@@ -68,13 +68,13 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: Venomouus/oficina-billing-service
-          ref: feat/fase4-bdd-coverage
+          ref: ${{ github.event_name == 'push' && 'main' || 'feat/fase4-bdd-coverage' }}
           path: Tests/dependencies/billing-service
       - name: Checkout Execution Service
         uses: actions/checkout@v4
         with:
           repository: Venomouus/oficina-execution-service
-          ref: feat/fase4-bdd-coverage
+          ref: ${{ github.event_name == 'push' && 'main' || 'feat/fase4-bdd-coverage' }}
           path: Tests/dependencies/execution-service
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
@@ -90,3 +90,35 @@ jobs:
         env:
           SAGA_BILLING_DIR: ${{ github.workspace }}/Tests/dependencies/billing-service
           SAGA_EXECUTION_DIR: ${{ github.workspace }}/Tests/dependencies/execution-service
+
+  publish-deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [build-test-analyze, distributed-bdd]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Login to GHCR
+        run: echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push immutable image
+        run: |
+          docker build -t ghcr.io/venomouus/oficina-os-service:${{ github.sha }} -t ghcr.io/venomouus/oficina-os-service:latest .
+          docker push ghcr.io/venomouus/oficina-os-service:${{ github.sha }}
+          docker push ghcr.io/venomouus/oficina-os-service:latest
+      - name: Deploy to Kubernetes
+        env:
+          KUBE_CONFIG_B64: ${{ secrets.KUBE_CONFIG_B64 }}
+        run: |
+          test -n "$KUBE_CONFIG_B64" || { echo 'Configure KUBE_CONFIG_B64 no repositorio'; exit 1; }
+          printf '%s' "$KUBE_CONFIG_B64" | base64 -d > "$RUNNER_TEMP/kubeconfig"
+          chmod 600 "$RUNNER_TEMP/kubeconfig"
+          export KUBECONFIG="$RUNNER_TEMP/kubeconfig"
+          kubectl get namespace oficina
+          kubectl -n oficina get secret messaging-secrets os-service-secrets
+          kubectl -n oficina apply -f k8s/deployment.yaml
+          kubectl -n oficina set image deployment/os-service os-service=ghcr.io/venomouus/oficina-os-service:${{ github.sha }}
+          kubectl -n oficina rollout status deployment/os-service --timeout=180s
