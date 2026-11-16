@@ -2,6 +2,9 @@ using System;
 using System.Threading.Tasks;
 using System.Linq;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
+using System.Threading;
 using Xunit;
 
 public class OrderTests
@@ -35,21 +38,72 @@ public class OrderTests
     [Fact]
     public void Bdd_Saga_Completes_Order_Flow_And_Compensates_Failures()
     {
-        // Given uma OS criada, When os eventos do fluxo chegam, Then cada etapa avanca corretamente.
-        var events = new[] { "BUDGET_CREATED", "PAYMENT_APPROVED", "EXECUTION_FINISHED" };
-        var statuses = events.Select(OrderSaga.NextStatusForEvent).ToArray();
-
-        Assert.Equal(new[]
+        var state = OrderStatuses.AguardandoOrcamento;
+        foreach (var (type, expected) in new[] {
+            ("BUDGET_CREATED", OrderStatuses.AguardandoPagamento),
+            ("PAYMENT_APPROVED", OrderStatuses.AguardandoExecucao),
+            ("EXECUTION_FINISHED", OrderStatuses.Finalizada) })
         {
-            OrderStatuses.AguardandoPagamento,
-            OrderStatuses.AguardandoExecucao,
-            OrderStatuses.Finalizada
-        }, statuses);
-
-        // Caminhos de compensacao encerram a etapa com um estado explicito.
-        Assert.Equal(OrderStatuses.OrcamentoRejeitado, OrderSaga.NextStatusForEvent("BUDGET_REJECTED"));
-        Assert.Equal(OrderStatuses.PagamentoRecusado, OrderSaga.NextStatusForEvent("PAYMENT_REJECTED"));
-        Assert.Equal(OrderStatuses.ExecucaoComErro, OrderSaga.NextStatusForEvent("EXECUTION_FAILED"));
+            state = OrderSaga.NextStatus(state, type)!;
+            Assert.Equal(expected, state);
+        }
+        Assert.Null(OrderSaga.NextStatus(state, "PAYMENT_REJECTED"));
+        Assert.Null(OrderSaga.NextStatus(state, "EXECUTION_FINISHED"));
+        Assert.Equal(OrderStatuses.OrcamentoRejeitado, OrderSaga.NextStatus(OrderStatuses.AguardandoPagamento, "BUDGET_REJECTED"));
+        Assert.Equal(OrderStatuses.PagamentoRecusado, OrderSaga.NextStatus(OrderStatuses.AguardandoPagamento, "PAYMENT_REJECTED"));
+        Assert.Equal(OrderStatuses.ExecucaoComErro, OrderSaga.NextStatus(OrderStatuses.AguardandoExecucao, "EXECUTION_FAILED"));
         Assert.True(OrderSaga.StartsExecution("PAYMENT_APPROVED"));
+    }
+
+    [Fact]
+    public void Duplicate_And_OutOfOrder_Events_Do_Not_Reopen_Or_Finalize_Order()
+    {
+        Assert.Null(OrderSaga.NextStatus(OrderStatuses.AguardandoOrcamento, "EXECUTION_FINISHED"));
+        Assert.Null(OrderSaga.NextStatus(OrderStatuses.AguardandoPagamento, "BUDGET_CREATED"));
+        Assert.Null(OrderSaga.NextStatus(OrderStatuses.OrcamentoRejeitado, "PAYMENT_APPROVED"));
+        Assert.Null(OrderSaga.NextStatus(OrderStatuses.ExecucaoComErro, "EXECUTION_FINISHED"));
+        Assert.Equal(OrderStatuses.AguardandoExecucao, OrderSaga.NextStatus(OrderStatuses.PagamentoRecusado, "PAYMENT_APPROVED"));
+    }
+
+    [Fact]
+    public async Task Outbox_Retries_After_Broker_Failure_Without_Losing_Event()
+    {
+        var services = new ServiceCollection();
+        var databaseName = Guid.NewGuid().ToString();
+        services.AddDbContext<OsDbContext>(x => x.UseInMemoryDatabase(databaseName));
+        await using var provider = services.BuildServiceProvider();
+        await using (var scope = provider.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<OsDbContext>();
+            db.Outbox.Add(SagaOutboxEvent.Create("OS_CREATED", new { orderId = Guid.NewGuid() }));
+            await db.SaveChangesAsync();
+        }
+        var publisher = new FailsOncePublisher();
+        using var worker = new OsOutboxWorker(provider.GetRequiredService<IServiceScopeFactory>(), publisher, NullLogger<OsOutboxWorker>.Instance);
+        await worker.StartAsync(CancellationToken.None);
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+            SagaOutboxEvent? item = null;
+            while (item?.PublishedAt is null && !timeout.IsCancellationRequested)
+            {
+                await using var scope = provider.CreateAsyncScope();
+                item = await scope.ServiceProvider.GetRequiredService<OsDbContext>().Outbox.AsNoTracking().SingleAsync();
+                if (item.PublishedAt is null) await Task.Delay(100, timeout.Token);
+            }
+            Assert.Equal(2, publisher.Attempts);
+            Assert.NotNull(item?.PublishedAt);
+        }
+        finally { await worker.StopAsync(CancellationToken.None); }
+    }
+
+    private sealed class FailsOncePublisher : IEventPublisher
+    {
+        public int Attempts;
+        public Task PublishAsync(string type, string body)
+        {
+            if (Interlocked.Increment(ref Attempts) == 1) throw new InvalidOperationException("RabbitMQ indisponivel");
+            return Task.CompletedTask;
+        }
     }
 }

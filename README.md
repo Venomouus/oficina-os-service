@@ -15,15 +15,37 @@ Microsservico responsavel pela abertura, consulta e atualizacao das ordens de se
 - Publica `OS_STATUS_UPDATED` ao alterar o status.
 - Publica `OS_READY_FOR_EXECUTION` apos pagamento aprovado.
 
-## Saga e BDD
+## Saga coreografada
 
-O OS Service concentra a decisao de transicao do Saga em `OrderSaga`. O fluxo
-principal e `BUDGET_CREATED -> PAYMENT_APPROVED -> EXECUTION_FINISHED`, com
-compensacoes explicitas para `BUDGET_REJECTED`, `PAYMENT_REJECTED` e
-`EXECUTION_FAILED`. O cenario BDD esta em
-`Tests/OsService.Tests/Features/order-lifecycle.feature` e e coberto pelo teste
-`Bdd_Saga_Completes_Order_Flow_And_Compensates_Failures`.
-- Consome eventos de orcamento, pagamento e execucao.
+Os tres servicos reagem a eventos RabbitMQ sem acessar o banco uns dos outros.
+`OS_CREATED -> BUDGET_CREATED -> PAYMENT_APPROVED -> OS_READY_FOR_EXECUTION ->
+EXECUTION_FINISHED` e o caminho feliz. Recusa de orcamento, recusa de pagamento
+e falha de execucao compensam a OS com `ORCAMENTO_REJEITADO`,
+`PAGAMENTO_RECUSADO` e `EXECUCAO_COM_ERRO`, respectivamente. A compensacao
+interrompe o avanco indevido; pagamento ja capturado nao e estornado
+automaticamente. Um eventual estorno exige politica propria e API do provedor.
+
+Cada mudanca grava o evento de saida no mesmo registro/transacao local (outbox).
+Um worker publica mensagens persistentes com confirmacao do RabbitMQ e tenta
+novamente a cada 2 segundos se falhar. Entregas duplicadas sao esperadas: as
+transicoes de `OrderSaga` ignoram repeticoes e eventos fora de ordem. O OS
+Service cria a tabela `saga_outbox` no PostgreSQL existente sem apagar dados.
+
+Os testes incluem o fluxo feliz, as compensacoes, eventos duplicados/fora de
+ordem e falha temporaria de publicacao. O arquivo Gherkin
+`Tests/OsService.Tests/Features/order-lifecycle.feature` e executado pelo
+Reqnroll/xUnit: os passos chamam a API da OS e o handler de eventos usado pelo
+consumidor RabbitMQ. Isso verifica a Saga no OS Service, mas nao substitui um
+teste externo com o Mercado Pago real ou com os tres processos em rede.
+
+Para executar BDD, testes de API e exigir pelo menos 80% de linhas do assembly:
+
+```powershell
+./scripts/verify-coverage.ps1
+```
+
+O script falha se a cobertura ficar abaixo de 80%. O CI publica o XML Cobertura
+como artefato `os-service-coverage` em cada execucao.
 
 ## Endpoints principais
 

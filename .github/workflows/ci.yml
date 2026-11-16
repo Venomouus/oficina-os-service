@@ -41,7 +41,14 @@ jobs:
         run: dotnet build Tests/OsService.Tests/OsService.Tests.csproj --no-restore --configuration Release
 
       - name: Test
-        run: dotnet test Tests/OsService.Tests/OsService.Tests.csproj --no-build --no-restore --configuration Release --collect:"XPlat Code Coverage"
+        run: pwsh ./scripts/verify-coverage.ps1 -Configuration Release
+
+      - name: Upload coverage evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: os-service-coverage
+          path: Tests/OsService.Tests/TestResults/**/coverage.cobertura.xml
 
       - name: End SonarCloud analysis
         if: always()
