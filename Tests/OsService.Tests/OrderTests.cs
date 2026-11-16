@@ -2,6 +2,7 @@ using System;
 using System.Threading.Tasks;
 using System.Linq;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using System.Threading;
@@ -77,6 +78,30 @@ public class OrderTests
         Assert.False(OrderSaga.StartsExecution(eventType));
         Assert.False(OrderSaga.IsTerminal(current));
         Assert.True(OrderSaga.IsTerminal(expected));
+    }
+
+    [Fact]
+    public async Task Concurrent_Saga_Updates_Cannot_Overwrite_A_Completed_Transition()
+    {
+        var root = new InMemoryDatabaseRoot();
+        var options = new DbContextOptionsBuilder<OsDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString(), root).Options;
+        var id = Guid.NewGuid();
+        await using (var setup = new OsDbContext(options))
+        {
+            setup.Orders.Add(new ServiceOrder { Id = id, Status = OrderStatuses.AguardandoPagamento });
+            await setup.SaveChangesAsync();
+        }
+        await using var first = new OsDbContext(options);
+        await using var second = new OsDbContext(options);
+        var order1 = await first.Orders.SingleAsync(x => x.Id == id);
+        var order2 = await second.Orders.SingleAsync(x => x.Id == id);
+        order1.Status = OrderStatuses.AguardandoExecucao;
+        await first.SaveChangesAsync();
+        order2.Status = OrderStatuses.PagamentoRecusado;
+        await Assert.ThrowsAsync<DbUpdateConcurrencyException>(() => second.SaveChangesAsync());
+        await using var verify = new OsDbContext(options);
+        Assert.Equal(OrderStatuses.AguardandoExecucao, (await verify.Orders.FindAsync(id))!.Status);
     }
 
     [Fact]

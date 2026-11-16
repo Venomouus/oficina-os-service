@@ -30,6 +30,12 @@ Um worker publica mensagens persistentes com confirmacao do RabbitMQ e tenta
 novamente a cada 2 segundos se falhar. Entregas duplicadas sao esperadas: as
 transicoes de `OrderSaga` ignoram repeticoes e eventos fora de ordem. O OS
 Service cria a tabela `saga_outbox` no PostgreSQL existente sem apagar dados.
+O status da OS e um token de concorrencia: dois consumidores nao podem gravar
+transicoes conflitantes ao mesmo tempo. O consumidor tenta reconectar quando o
+RabbitMQ nao esta disponivel. Falhas temporarias aguardam 30 segundos na fila
+`os-service-events.retry` e recebem ate 5 novas tentativas; mensagens malformadas ou
+que excederam esse limite ficam em `os-service-events.dead` para inspecao e
+reenvio manual apos corrigir a causa. Nao apague a fila dead sem investigar.
 
 Os testes incluem o fluxo feliz, as compensacoes, eventos duplicados/fora de
 ordem e falha temporaria de publicacao. O arquivo Gherkin
@@ -46,6 +52,9 @@ Para executar BDD, testes de API e exigir pelo menos 80% de linhas do assembly:
 
 O script falha se a cobertura ficar abaixo de 80%. O CI publica o XML Cobertura
 como artefato `os-service-coverage` em cada execucao.
+O [painel SonarCloud do PR](https://sonarcloud.io/dashboard?id=Venomouus_oficina-os-service&pullRequest=1)
+mostra o quality gate e a cobertura de codigo novo; o verificador acima mede
+separadamente todas as linhas da assembly de producao.
 
 ## Endpoints principais
 

@@ -118,7 +118,7 @@ public class OsDbContext(DbContextOptions<OsDbContext> options) : DbContext(opti
     public DbSet<ServiceOrder> Orders => Set<ServiceOrder>();
     public DbSet<OrderHistory> OrderHistories => Set<OrderHistory>();
     public DbSet<SagaOutboxEvent> Outbox => Set<SagaOutboxEvent>();
-    protected override void OnModelCreating(ModelBuilder modelBuilder) { modelBuilder.Entity<ServiceOrder>().HasMany(x => x.History).WithOne().HasForeignKey(x => x.OrderId); modelBuilder.Entity<ServiceOrder>().Property(x => x.Status).HasMaxLength(50); modelBuilder.Entity<SagaOutboxEvent>().ToTable("saga_outbox"); }
+    protected override void OnModelCreating(ModelBuilder modelBuilder) { modelBuilder.Entity<ServiceOrder>().HasMany(x => x.History).WithOne().HasForeignKey(x => x.OrderId); modelBuilder.Entity<ServiceOrder>().Property(x => x.Status).HasMaxLength(50).IsConcurrencyToken(); modelBuilder.Entity<SagaOutboxEvent>().ToTable("saga_outbox"); }
 }
 
 public class SagaOutboxEvent
@@ -201,23 +201,13 @@ public sealed class OsOutboxWorker(IServiceScopeFactory scopes, IEventPublisher 
 
 public sealed class OsEventConsumer(IServiceScopeFactory scopes, IConfiguration configuration, ILogger<OsEventConsumer> logger) : BackgroundService
 {
-    protected override Task ExecuteAsync(CancellationToken stoppingToken)
+    protected override Task ExecuteAsync(CancellationToken stoppingToken) => ReliableRabbitConsumer.RunAsync(
+        configuration, "os-service-events",
+        ["BUDGET_CREATED", "BUDGET_REJECTED", "PAYMENT_APPROVED", "PAYMENT_REJECTED", "EXECUTION_FINISHED", "EXECUTION_FAILED"],
+        async body =>
     {
-        var settings = configuration.GetSection("RabbitMq"); var factory = new ConnectionFactory { HostName = settings["Host"] ?? "localhost", Port = settings.GetValue("Port", 5672), UserName = settings["User"] ?? "oficina", Password = settings["Password"] ?? "oficina" }; var connection = factory.CreateConnection(); var channel = connection.CreateModel(); channel.ExchangeDeclare("oficina.events", ExchangeType.Topic, durable: true); var queue = channel.QueueDeclare("os-service-events", true, false, false).QueueName; channel.BasicQos(0, 1, false);
-        foreach (var type in new[] { "BUDGET_CREATED", "BUDGET_REJECTED", "PAYMENT_APPROVED", "PAYMENT_REJECTED", "EXECUTION_FINISHED", "EXECUTION_FAILED" }) channel.QueueBind(queue, "oficina.events", type);
-        var consumer = new EventingBasicConsumer(channel);
-        consumer.Received += async (_, args) =>
-        {
-            try
-            {
-                using var document = JsonDocument.Parse(args.Body.ToArray()); var payload = document.RootElement.GetProperty("payload"); var orderId = payload.GetProperty("orderId").GetGuid(); var type = document.RootElement.GetProperty("type").GetString() ?? ""; using var scope = scopes.CreateScope(); var handler = scope.ServiceProvider.GetRequiredService<OsSagaHandler>();
-                await handler.HandleAsync(orderId, type);
-                channel.BasicAck(args.DeliveryTag, false);
-            }
-            catch (JsonException ex) { logger.LogError(ex, "Evento de OS malformado; descartando"); channel.BasicReject(args.DeliveryTag, false); }
-            catch (Exception ex) { logger.LogError(ex, "Falha ao processar evento de OS"); channel.BasicNack(args.DeliveryTag, false, true); }
-        };
-        channel.BasicConsume(queue, false, consumer); return Task.CompletedTask;
-    }
+        using var document = JsonDocument.Parse(body); var payload = document.RootElement.GetProperty("payload"); var orderId = payload.GetProperty("orderId").GetGuid(); var type = document.RootElement.GetProperty("type").GetString() ?? ""; using var scope = scopes.CreateScope(); var handler = scope.ServiceProvider.GetRequiredService<OsSagaHandler>();
+        await handler.HandleAsync(orderId, type);
+    }, logger, stoppingToken);
 }
 }
