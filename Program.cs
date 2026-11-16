@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
+using Oficina.Os;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Logging.AddFilter("Microsoft.EntityFrameworkCore.Database.Command", LogLevel.Warning);
@@ -71,6 +72,8 @@ static async Task ChangeStatusAsync(ServiceOrder order, string status, string re
 
 public partial class Program { }
 
+namespace Oficina.Os
+{
 public record CreateOrderRequest(string CustomerName, string VehiclePlate, string Description);
 public record UpdateStatusRequest(string Status);
 
@@ -216,4 +219,5 @@ public sealed class OsEventConsumer(IServiceScopeFactory scopes, IConfiguration 
         };
         channel.BasicConsume(queue, false, consumer); return Task.CompletedTask;
     }
+}
 }

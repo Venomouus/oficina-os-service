@@ -17,5 +17,6 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../OsService.csproj" />
+    <Using Include="Oficina.Os" />
   </ItemGroup>
 </Project>

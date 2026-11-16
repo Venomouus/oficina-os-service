@@ -3,7 +3,7 @@ param([string]$Configuration = "Release")
 $ErrorActionPreference = "Stop"
 $project = Join-Path $PSScriptRoot "../Tests/OsService.Tests/OsService.Tests.csproj"
 $results = Join-Path $PSScriptRoot "../Tests/OsService.Tests/TestResults/$([guid]::NewGuid())"
-dotnet test $project --configuration $Configuration --collect:"XPlat Code Coverage" --results-directory $results
+dotnet test $project --configuration $Configuration --collect:"XPlat Code Coverage" --results-directory $results -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura,opencover
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 $reports = @(Get-ChildItem -Path $results -Filter coverage.cobertura.xml -Recurse -File)

@@ -1,3 +1,5 @@
+namespace Oficina.Os;
+
 public static class OrderSaga
 {
     // null significa entrega duplicada ou fora de ordem; nao desfaz estado terminal.
