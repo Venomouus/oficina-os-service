@@ -44,6 +44,22 @@ Reqnroll/xUnit: os passos chamam a API da OS e o handler de eventos usado pelo
 consumidor RabbitMQ. Isso verifica a Saga no OS Service, mas nao substitui um
 teste externo com o Mercado Pago real ou com os tres processos em rede.
 
+O BDD distribuido em `Tests/Saga.E2E/Features/distributed-saga.feature`
+inicia PostgreSQL, MongoDB e RabbitMQ descartaveis com Testcontainers e sobe
+OS, Billing e Execution como processos HTTP separados. Testa pagamento
+sandbox simulado, finalizacao e compensacao por falha de execucao. Nao usa
+credenciais nem API real do Mercado Pago. Requer Docker e os tres repositorios
+lado a lado em `services/`. Execute, depois de compilar os tres servicos em
+`Release`:
+
+```powershell
+dotnet test Tests/Saga.E2E/Saga.E2E.csproj -c Release
+```
+
+O job `distributed-bdd` do CI repete o teste usando as branches
+`feat/fase4-bdd-coverage` de Billing e Execution; apos o merge dos tres PRs,
+atualize esses dois refs para `main`.
+
 Para executar BDD, testes de API e exigir pelo menos 80% de linhas do assembly:
 
 ```powershell

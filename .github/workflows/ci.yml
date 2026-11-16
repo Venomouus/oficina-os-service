@@ -58,3 +58,35 @@ jobs:
 
       - name: Docker build
         run: docker build --tag oficina-os-service:${{ github.sha }} .
+
+  distributed-bdd:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout OS Service
+        uses: actions/checkout@v4
+      - name: Checkout Billing Service
+        uses: actions/checkout@v4
+        with:
+          repository: Venomouus/oficina-billing-service
+          ref: feat/fase4-bdd-coverage
+          path: Tests/dependencies/billing-service
+      - name: Checkout Execution Service
+        uses: actions/checkout@v4
+        with:
+          repository: Venomouus/oficina-execution-service
+          ref: feat/fase4-bdd-coverage
+          path: Tests/dependencies/execution-service
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Build services
+        run: |
+          dotnet build OsService.csproj -c Release
+          dotnet build Tests/dependencies/billing-service/BillingService.csproj -c Release
+          dotnet build Tests/dependencies/execution-service/ExecutionService.csproj -c Release
+      - name: Run distributed BDD
+        run: dotnet test Tests/Saga.E2E/Saga.E2E.csproj -c Release --logger "console;verbosity=normal"
+        env:
+          SAGA_BILLING_DIR: ${{ github.workspace }}/Tests/dependencies/billing-service
+          SAGA_EXECUTION_DIR: ${{ github.workspace }}/Tests/dependencies/execution-service
