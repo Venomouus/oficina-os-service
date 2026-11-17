@@ -68,13 +68,13 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: Venomouus/oficina-billing-service
-          ref: ${{ github.event_name == 'push' && 'main' || 'feat/fase4-bdd-coverage' }}
+          ref: main
           path: Tests/dependencies/billing-service
       - name: Checkout Execution Service
         uses: actions/checkout@v4
         with:
           repository: Venomouus/oficina-execution-service
-          ref: ${{ github.event_name == 'push' && 'main' || 'feat/fase4-bdd-coverage' }}
+          ref: main
           path: Tests/dependencies/execution-service
       - name: Setup .NET
         uses: actions/setup-dotnet@v4

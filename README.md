@@ -56,9 +56,8 @@ lado a lado em `services/`. Execute, depois de compilar os tres servicos em
 dotnet test Tests/Saga.E2E/Saga.E2E.csproj -c Release
 ```
 
-O job `distributed-bdd` do CI repete o teste usando as branches
-`feat/fase4-bdd-coverage` de Billing e Execution; apos o merge dos tres PRs,
-atualize esses dois refs para `main`.
+O job `distributed-bdd` do CI repete o teste com a branch `main` de Billing
+e Execution tanto em PRs quanto em pushes na `main` do OS Service.
 
 Para executar BDD, testes de API e exigir pelo menos 80% de linhas do assembly:
 
