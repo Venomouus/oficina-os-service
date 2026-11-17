@@ -91,11 +91,12 @@ Configuracao padrao: PostgreSQL em `localhost:5433` e RabbitMQ em `localhost:567
 ## CI/CD e observabilidade
 
 O PR executa testes/cobertura, BDD distribuido, SonarCloud com Quality Gate
-bloqueante e build Docker. Em `main`, o job `publish-deploy` publica a imagem
-`ghcr.io/venomouus/oficina-os-service:<SHA>` e aguarda o rollout em Kubernetes.
-E preciso configurar `KUBE_CONFIG_B64` no GitHub, o namespace `oficina` e os
-Secrets `messaging-secrets` e `os-service-secrets` no cluster; sem eles o
-deploy falha. O manifesto nao contem credenciais reais.
+bloqueante e build Docker. Em `main`, o job `publish-deploy` assume a role AWS
+via OIDC, publica a imagem `oficina-fase4-lab/os-service:<SHA>` no ECR privado
+e aguarda o rollout no EKS. O namespace `oficina`, os Secrets
+`messaging-secrets` e `os-service-secrets` e a role de deploy precisam existir;
+o manifesto nao contem credenciais reais. O lab e temporario e usa `emptyDir`
+para os bancos: os dados se perdem se o pod for recriado.
 
 Logs JSON vao para stdout. Com `OTEL_EXPORTER_OTLP_ENDPOINT` definido, traces,
 metricas HTTP/Saga e logs vao por OTLP gRPC ao coletor; o ConfigMap opcional
