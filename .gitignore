@@ -1,5 +1,7 @@
 bin/
 obj/
+**/TestResults/
+*.feature.cs
 .vs/
 *.user
 *.suo

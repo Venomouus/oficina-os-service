@@ -33,7 +33,7 @@ jobs:
         run: dotnet restore Tests/OsService.Tests/OsService.Tests.csproj
 
       - name: Begin SonarCloud analysis
-        run: '"$RUNNER_TEMP/sonar/dotnet-sonarscanner" begin /k:"Venomouus_oficina-os-service" /o:"venomouus" /d:sonar.token="$SONAR_TOKEN"'
+        run: '"$RUNNER_TEMP/sonar/dotnet-sonarscanner" begin /k:"Venomouus_oficina-os-service" /o:"venomouus" /d:sonar.token="$SONAR_TOKEN" /d:sonar.cs.opencover.reportsPaths="Tests/OsService.Tests/TestResults/**/coverage.opencover.xml" /d:sonar.coverage.exclusions="**/*.ps1" /d:sonar.qualitygate.wait=true'
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
@@ -41,7 +41,14 @@ jobs:
         run: dotnet build Tests/OsService.Tests/OsService.Tests.csproj --no-restore --configuration Release
 
       - name: Test
-        run: dotnet test Tests/OsService.Tests/OsService.Tests.csproj --no-build --no-restore --configuration Release --collect:"XPlat Code Coverage"
+        run: pwsh ./scripts/verify-coverage.ps1 -Configuration Release
+
+      - name: Upload coverage evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: os-service-coverage
+          path: Tests/OsService.Tests/TestResults/**/coverage.cobertura.xml
 
       - name: End SonarCloud analysis
         if: always()
@@ -51,3 +58,65 @@ jobs:
 
       - name: Docker build
         run: docker build --tag oficina-os-service:${{ github.sha }} .
+
+  distributed-bdd:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout OS Service
+        uses: actions/checkout@v4
+      - name: Checkout Billing Service
+        uses: actions/checkout@v4
+        with:
+          repository: Venomouus/oficina-billing-service
+          ref: ${{ github.event_name == 'push' && 'main' || 'feat/fase4-bdd-coverage' }}
+          path: Tests/dependencies/billing-service
+      - name: Checkout Execution Service
+        uses: actions/checkout@v4
+        with:
+          repository: Venomouus/oficina-execution-service
+          ref: ${{ github.event_name == 'push' && 'main' || 'feat/fase4-bdd-coverage' }}
+          path: Tests/dependencies/execution-service
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Build services
+        run: |
+          dotnet build OsService.csproj -c Release
+          dotnet build Tests/dependencies/billing-service/BillingService.csproj -c Release
+          dotnet build Tests/dependencies/execution-service/ExecutionService.csproj -c Release
+      - name: Run distributed BDD
+        run: dotnet test Tests/Saga.E2E/Saga.E2E.csproj -c Release --logger "console;verbosity=normal"
+        env:
+          SAGA_BILLING_DIR: ${{ github.workspace }}/Tests/dependencies/billing-service
+          SAGA_EXECUTION_DIR: ${{ github.workspace }}/Tests/dependencies/execution-service
+
+  publish-deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [build-test-analyze, distributed-bdd]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6
+        with:
+          role-to-assume: arn:aws:iam::639793186952:role/oficina-fase4-lab-github-deploy
+          aws-region: sa-east-1
+          allowed-account-ids: '639793186952'
+      - uses: azure/setup-kubectl@776406bce94f63e41d621b960d78ee25c8b76ede # v4
+      - name: Build and push immutable image
+        run: |
+          IMAGE=639793186952.dkr.ecr.sa-east-1.amazonaws.com/oficina-fase4-lab/os-service:${{ github.sha }}
+          if ! aws ecr describe-images --repository-name oficina-fase4-lab/os-service --image-ids imageTag=${{ github.sha }} >/dev/null 2>&1; then
+            aws ecr get-login-password --region sa-east-1 | docker login --username AWS --password-stdin 639793186952.dkr.ecr.sa-east-1.amazonaws.com
+            docker build -t "$IMAGE" .
+            docker push "$IMAGE"
+          fi
+      - name: Deploy to Kubernetes
+        run: |
+          aws eks update-kubeconfig --name oficina-fase4-lab --region sa-east-1
+          IMAGE=639793186952.dkr.ecr.sa-east-1.amazonaws.com/oficina-fase4-lab/os-service:${{ github.sha }}
+          sed "s#ghcr.io/venomouus/oficina-os-service:latest#$IMAGE#" k8s/deployment.yaml | kubectl -n oficina apply -f -
+          kubectl -n oficina rollout status deployment/os-service --timeout=180s
